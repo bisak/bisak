@@ -129,6 +129,9 @@ def decorate(path, stats):
     for t in list(root.iter(f"{{{NS}}}text")):
         if DATE_RANGE.fullmatch(t.text or ""):
             parents[t].remove(t)
+    # Transparent background so the image blends into GitHub's light/dark page colour.
+    for r in root.findall(f"{{{NS}}}rect[@class='fill-bg']"):
+        root.remove(r)
     root.find(f"{{{NS}}}style").text += FONT_CSS
     root.append(captions(stats))
     root.append(car(stats))
