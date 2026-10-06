@@ -3,6 +3,7 @@ import glob
 import json
 import math
 import os
+import random
 import re
 import sys
 import urllib.request
@@ -18,8 +19,14 @@ FONT_CSS = (
     + base64.b64encode(open(FONT, "rb").read()).decode()
     + ') format("woff2"); }\n* { font-family: "Space Grotesk", "Helvetica", "Arial", sans-serif; }'
 )
-YARIS = "data:image/webp;base64," + base64.b64encode(
-    open(os.path.join(os.path.dirname(__file__), "gr-yaris.webp"), "rb").read()).decode()
+
+
+def sprite(name):
+    # Side-profile renders of my own cars (Nano Banana pass over my photos, then cut out).
+    with open(os.path.join(os.path.dirname(__file__), name), "rb") as f:
+        return "data:image/webp;base64," + base64.b64encode(f.read()).decode()
+
+
 DATE_RANGE = re.compile(r"\d{4}-\d{2}-\d{2} / \d{4}-\d{2}-\d{2}")
 
 QUERY = """query($login: String!) { user(login: $login) { contributionsCollection {
@@ -93,56 +100,85 @@ def lane(s, shift_x=0, shift_y=0):
         return 7 * dx + (w - 6) * dx - 2 + shift_x, offset_y + (w + 6) * dy + 6 + shift_y
 
     # Starts and ends off-canvas so the loop restart is never visible.
-    (x0, y0), (x1, y1) = edge(-5), edge(weeks + 5)
+    (x0, y0), (x1, y1) = edge(-10), edge(weeks + 9)
     return f"M{x0:.1f},{y0:.1f} L{x1:.1f},{y1:.1f}"
 
 
-def driving(path, dur, scale, begin="0s"):
+def wave(rng, period, terms):
+    # Random smooth periodic signal: integer harmonics of `period`, so it loops seamlessly.
+    parts = [(amp, k, rng.uniform(0, 2 * math.pi)) for amp, k in terms]
+    return lambda t: sum(a * math.sin(2 * math.pi * k * t / period + ph) for a, k, ph in parts)
+
+
+def driving(path, laps, scale, seed):
+    """Car on `path` with a different speed profile every lap, lane drift and suspension bob.
+
+    laps: [(seconds on screen, seconds parked off-canvas before the next lap)]. Lap lengths
+    differ between cars, so overtakes land at different places each time.
+    """
+    rng = random.Random(seed)
+    times, points, t = [0.0], [0.0], 0.0
+    shown = [(0.0, "visible")]
+    for lap, gap in laps:
+        n = int(lap * 4)
+        speed = wave(rng, lap, [(rng.uniform(0.15, 0.3), 1), (rng.uniform(0.08, 0.18), 2),
+                                (rng.uniform(0.04, 0.1), 4)])
+        v = [1 + speed(lap * (i + 0.5) / n) for i in range(n)]
+        dist = 0.0
+        for i in range(n):
+            dist += v[i] / sum(v)
+            times.append(t + lap * (i + 1) / n)
+            points.append(min(dist, 1.0))
+        shown.append((t + lap, "hidden"))
+        t += lap + gap
+        shown.append((t + 0.002, "visible"))
+        times += [t, t + 0.002]  # hold off-canvas, then jump back to the start (also off-canvas)
+        points += [1.0, 0.0]
+    total = times[-1]
     mover = el("g")
-    el("animateMotion", mover, path=path, dur=dur, begin=begin, repeatCount="indefinite")
-    return mover, el("g", mover, transform=f"skewY(30) scale({scale})")
+    el("animateMotion", mover, path=path, dur=f"{total:.3f}s", repeatCount="indefinite",
+       calcMode="linear", keyTimes=";".join(f"{x / total:.6f}" for x in times[:-1]) + ";1",
+       keyPoints=";".join(f"{x:.4f}" for x in points))
+    # The 2 ms jump back sweeps the whole path; keep the car hidden so no frame can catch it.
+    shown.pop()
+    el("animate", mover, attributeName="visibility", calcMode="discrete", dur=f"{total:.3f}s",
+       repeatCount="indefinite", keyTimes=";".join(f"{x / total:.6f}" for x, _ in shown),
+       values=";".join(v for _, v in shown))
+    period = round(rng.uniform(9, 14), 1)
+    drift = wave(rng, period, [(3.0, 1), (1.5, 2), (0.6, 3)])
+    bob = wave(rng, period, [(0.5, round(period / 0.55)), (0.3, round(period / 0.37))])
+    samples = [i * 0.1 for i in range(int(period * 10) + 1)]
+    sway = el("g", mover)
+    el("animateTransform", sway, attributeName="transform", type="translate", dur=f"{period}s",
+       repeatCount="indefinite", values=";".join(
+           f"{-0.866 * drift(x):.2f} {0.5 * drift(x) + bob(x):.2f}" for x in samples))
+    return mover, el("g", sway, transform=f"skewY(30) scale({scale})")
 
 
-def wheels(body, xs, spin, hub="#b0b0b0"):
-    for wx in xs:
-        el("circle", body, cx=wx, cy=-4, r=5, fill="#141414")
-        el("circle", body, cx=wx, cy=-4, r=2.2, fill=hub)
-        spokes = el("g", el("g", body, transform=f"translate({wx} -4)"))
-        el("path", spokes, d="M-3.5,0 H3.5 M0,-3.5 V3.5", stroke="#6b6b6b", stroke_width=1)
-        el("animateTransform", spokes, attributeName="transform", type="rotate",
-           values="0;360", dur=spin, repeatCount="indefinite")
-
-
-def red_car(s):
-    mover, body = driving(lane(s), "16s", 2.2)
-    el("ellipse", body, cx=0, cy=0, rx=25, ry=2.2, fill="#000000", opacity="0.22")
-    for cx in (-24, -30, -36):
-        puff = el("circle", body, cx=cx, cy=-5, r=3, fill="#9aa0a6", opacity="0")
-        el("animate", puff, attributeName="opacity", values="0;0.6;0", dur="0.9s",
-           begin=f"{(cx + 36) / 40:.2f}s", repeatCount="indefinite")
-        el("animate", puff, attributeName="r", values="2;6", dur="0.9s",
-           begin=f"{(cx + 36) / 40:.2f}s", repeatCount="indefinite")
-    el("rect", body, x=-22, y=-14, width=44, height=10, rx=3, fill="#e10600")
-    el("path", body, d="M-12,-14 L-6,-23 L10,-23 L16,-14 Z", fill="#e10600")
-    el("path", body, d="M-9,-15 L-4.5,-21 L1,-21 L1,-15 Z M3,-15 L3,-21 L9,-21 L13,-15 Z", fill="#cfe8ff")
-    el("rect", body, x=-22, y=-9, width=44, height=2, fill="#ffffff", opacity="0.8")
-    el("circle", body, cx=20, cy=-11, r=1.8, fill="#ffd400")
-    wheels(body, (-12, 12), "0.4s")
+def evo_x(s):
+    mover, body = driving(lane(s, -16, 9), [(15.5, 0.8), (18.0, 1.6), (13.9, 0.4)], 1, seed=10)
+    el("ellipse", body, cx=0, cy=0, rx=84, ry=4, fill="#000000", opacity="0.25")
+    for cx in (-90, -98, -106):
+        puff = el("circle", body, cx=cx, cy=-9, r=4, fill="#9aa0a6", opacity="0")
+        el("animate", puff, attributeName="opacity", values="0;0.55;0", dur="0.9s",
+           begin=f"{(cx + 106) / 50:.2f}s", repeatCount="indefinite")
+        el("animate", puff, attributeName="r", values="3;8", dur="0.9s",
+           begin=f"{(cx + 106) / 50:.2f}s", repeatCount="indefinite")
+    el("image", body, href=sprite("evo-x.webp"), x=-85, y=-62, width=170, height=62)
     return mover
 
 
 def gr_yaris(s):
-    # Twice the red car's speed in the lane nearer the viewer. begin=-4s puts it half a lap
-    # ahead, so it catches the red car exactly mid-screen once per 16s cycle.
-    mover, body = driving(lane(s, -50, 29), "8s", 1, begin="-4s")
+    # Roughly twice the Evo's pace in the lane nearer the viewer; lap lengths differ from the
+    # Evo's so the overtake happens somewhere new each time.
+    mover, body = driving(lane(s, -62, 36), [(7.4, 0.3), (9.1, 1.2), (6.6, 0.5), (8.2, 2.0)], 1, seed=96)
     el("ellipse", body, cx=0, cy=0, rx=74, ry=4, fill="#000000", opacity="0.25")
     for i, y in enumerate((-12, -28, -44)):
         line = el("path", body, d=f"M-80,{y} H-122", stroke="#c8ccd2", stroke_width=1.6,
                   stroke_linecap="round", opacity="0")
         el("animate", line, attributeName="opacity", values="0;0.8;0", dur="0.3s",
            begin=f"{i * 0.1:.1f}s", repeatCount="indefinite")
-    # Photo of the actual car (cut out, mirrored, windows tinted, rims motion-blurred).
-    el("image", body, href=YARIS, x=-75, y=-60.5, width=150, height=60.5)
+    el("image", body, href=sprite("gr-yaris.webp"), x=-75, y=-59, width=150, height=59)
     return mover
 
 
@@ -163,7 +199,7 @@ def decorate(path, stats):
         root.remove(r)
     root.find(f"{{{NS}}}style").text += FONT_CSS
     root.append(captions(stats))
-    root.append(red_car(stats))
+    root.append(evo_x(stats))
     root.append(gr_yaris(stats))
     tree.write(path, encoding="unicode")
 
