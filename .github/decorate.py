@@ -89,19 +89,46 @@ def captions(s):
     return g
 
 
-def lane(s, shift_x=0, shift_y=0):
-    # Mirrors create-3d-contrib.ts (v0.9.3) grid math so cars drive the front edge (Saturday row).
+def ground(s):
+    """Map grid coordinates to the SVG. Mirrors create-3d-contrib.ts (v0.9.3).
+
+    W counts weeks (left to right), D counts weekdays towards the viewer; the bars occupy
+    0 <= D <= 7, so D > 7 is the strip in front of the graph where the road goes.
+    """
     dx = 1280 / 64
     dy = dx * math.tan(math.radians(30))
     weeks = math.ceil((s["day_count"] + s["first_weekday"]) / 7)
     offset_y = 850 - (weeks + 7) * dy
+    return weeks, lambda w, d: (160 + (w - d) * dx, offset_y + (w + d - 1) * dy)
 
-    def edge(w):
-        return 7 * dx + (w - 6) * dx - 2 + shift_x, offset_y + (w + 6) * dy + 6 + shift_y
 
+EVO_LANE, YARIS_LANE = 8.2, 10.2
+
+
+def lane(s, d):
+    weeks, at = ground(s)
     # Starts and ends off-canvas so the loop restart is never visible.
-    (x0, y0), (x1, y1) = edge(-10), edge(weeks + 9)
+    (x0, y0), (x1, y1) = at(-10, d), at(weeks + 9, d)
     return f"M{x0:.1f},{y0:.1f} L{x1:.1f},{y1:.1f}"
+
+
+def road(s):
+    weeks, at = ground(s)
+    w0, w1 = -15, weeks + 15
+
+    def line(d):
+        (x0, y0), (x1, y1) = at(w0, d), at(w1, d)
+        return f"M{x0:.1f},{y0:.1f} L{x1:.1f},{y1:.1f}"
+
+    g = el("g")
+    corners = [at(w0, 7.25), at(w1, 7.25), at(w1, 11.15), at(w0, 11.15)]
+    el("path", g, d="M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in corners) + " Z",
+       class_="fill-weak", opacity="0.16")
+    for d in (7.4, 11.0):
+        el("path", g, d=line(d), class_="stroke-weak", stroke_width=2, opacity="0.6", fill="none")
+    el("path", g, d=line((EVO_LANE + YARIS_LANE) / 2), class_="stroke-weak", stroke_width=2,
+       stroke_dasharray="26 20", opacity="0.6", fill="none")
+    return g
 
 
 def wave(rng, period, terms):
@@ -152,33 +179,40 @@ def driving(path, laps, scale, seed):
     el("animateTransform", sway, attributeName="transform", type="translate", dur=f"{period}s",
        repeatCount="indefinite", values=";".join(
            f"{-0.866 * drift(x):.2f} {0.5 * drift(x) + bob(x):.2f}" for x in samples))
-    return mover, el("g", sway, transform=f"skewY(30) scale({scale})")
+    return mover, el("g", sway, transform=f"scale({scale})")
+
+
+def iso_car(body, name, w, h):
+    # Isometric render, nose towards the lower right; (0, 0) is the middle of the car's footprint.
+    el("ellipse", body, cx=0, cy=0, rx=w * 0.42, ry=h * 0.16, transform="rotate(30)",
+       fill="#000000", opacity="0.22")
+    el("image", body, href=sprite(name), x=-w / 2, y=-h * 0.6, width=w, height=h)
 
 
 def evo_x(s):
-    mover, body = driving(lane(s, -16, 9), [(15.5, 0.8), (18.0, 1.6), (13.9, 0.4)], 1, seed=10)
-    el("ellipse", body, cx=0, cy=0, rx=84, ry=4, fill="#000000", opacity="0.25")
-    for cx in (-90, -98, -106):
-        puff = el("circle", body, cx=cx, cy=-9, r=4, fill="#9aa0a6", opacity="0")
-        el("animate", puff, attributeName="opacity", values="0;0.55;0", dur="0.9s",
-           begin=f"{(cx + 106) / 50:.2f}s", repeatCount="indefinite")
-        el("animate", puff, attributeName="r", values="3;8", dur="0.9s",
-           begin=f"{(cx + 106) / 50:.2f}s", repeatCount="indefinite")
-    el("image", body, href=sprite("evo-x.webp"), x=-85, y=-62, width=170, height=62)
+    mover, body = driving(lane(s, EVO_LANE), [(15.5, 0.8), (18.0, 1.6), (13.9, 0.4)], 1, seed=10)
+    for i in range(3):
+        cx, cy = -86 - i * 9, -24 - i * 5  # behind the rear bumper, along the direction of travel
+        puff = el("circle", body, cx=cx, cy=cy, r=4, fill="#9aa0a6", opacity="0")
+        el("animate", puff, attributeName="opacity", values="0;0.5;0", dur="0.9s",
+           begin=f"{i * 0.3:.1f}s", repeatCount="indefinite")
+        el("animate", puff, attributeName="r", values="3;9", dur="0.9s",
+           begin=f"{i * 0.3:.1f}s", repeatCount="indefinite")
+    iso_car(body, "evo-x.webp", 185, 131)
     return mover
 
 
 def gr_yaris(s):
     # Roughly twice the Evo's pace in the lane nearer the viewer; lap lengths differ from the
     # Evo's so the overtake happens somewhere new each time.
-    mover, body = driving(lane(s, -62, 36), [(7.4, 0.3), (9.1, 1.2), (6.6, 0.5), (8.2, 2.0)], 1, seed=96)
-    el("ellipse", body, cx=0, cy=0, rx=74, ry=4, fill="#000000", opacity="0.25")
-    for i, y in enumerate((-12, -28, -44)):
-        line = el("path", body, d=f"M-80,{y} H-122", stroke="#c8ccd2", stroke_width=1.6,
-                  stroke_linecap="round", opacity="0")
+    mover, body = driving(lane(s, YARIS_LANE), [(7.4, 0.3), (9.1, 1.2), (6.6, 0.5), (8.2, 2.0)], 1, seed=96)
+    for i, off in enumerate((-14, 0, 14)):
+        x0, y0 = -70 + off * 0.5, -22 + off * 0.866
+        line = el("path", body, d=f"M{x0:.1f},{y0:.1f} l-42,-24.2", stroke="#c8ccd2",
+                  stroke_width=1.6, stroke_linecap="round", opacity="0")
         el("animate", line, attributeName="opacity", values="0;0.8;0", dur="0.3s",
            begin=f"{i * 0.1:.1f}s", repeatCount="indefinite")
-    el("image", body, href=sprite("gr-yaris.webp"), x=-75, y=-59, width=150, height=59)
+    iso_car(body, "gr-yaris.webp", 165, 125.5)
     return mover
 
 
@@ -199,6 +233,7 @@ def decorate(path, stats):
         root.remove(r)
     root.find(f"{{{NS}}}style").text += FONT_CSS
     root.append(captions(stats))
+    root.append(road(stats))
     root.append(evo_x(stats))
     root.append(gr_yaris(stats))
     tree.write(path, encoding="unicode")
