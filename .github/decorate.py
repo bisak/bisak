@@ -18,6 +18,8 @@ FONT_CSS = (
     + base64.b64encode(open(FONT, "rb").read()).decode()
     + ') format("woff2"); }\n* { font-family: "Space Grotesk", "Helvetica", "Arial", sans-serif; }'
 )
+YARIS = "data:image/webp;base64," + base64.b64encode(
+    open(os.path.join(os.path.dirname(__file__), "gr-yaris.webp"), "rb").read()).decode()
 DATE_RANGE = re.compile(r"\d{4}-\d{2}-\d{2} / \d{4}-\d{2}-\d{2}")
 
 QUERY = """query($login: String!) { user(login: $login) { contributionsCollection {
@@ -95,12 +97,10 @@ def lane(s, shift_x=0, shift_y=0):
     return f"M{x0:.1f},{y0:.1f} L{x1:.1f},{y1:.1f}"
 
 
-def driving(path, dur, begin="0s"):
+def driving(path, dur, scale, begin="0s"):
     mover = el("g")
     el("animateMotion", mover, path=path, dur=dur, begin=begin, repeatCount="indefinite")
-    body = el("g", mover, transform="skewY(30) scale(1.5)")
-    el("ellipse", body, cx=0, cy=0, rx=25, ry=2.2, fill="#000000", opacity="0.22")
-    return mover, body
+    return mover, el("g", mover, transform=f"skewY(30) scale({scale})")
 
 
 def wheels(body, xs, spin, hub="#b0b0b0"):
@@ -114,7 +114,8 @@ def wheels(body, xs, spin, hub="#b0b0b0"):
 
 
 def red_car(s):
-    mover, body = driving(lane(s), "16s")
+    mover, body = driving(lane(s), "16s", 2.2)
+    el("ellipse", body, cx=0, cy=0, rx=25, ry=2.2, fill="#000000", opacity="0.22")
     for cx in (-24, -30, -36):
         puff = el("circle", body, cx=cx, cy=-5, r=3, fill="#9aa0a6", opacity="0")
         el("animate", puff, attributeName="opacity", values="0;0.6;0", dur="0.9s",
@@ -133,25 +134,15 @@ def red_car(s):
 def gr_yaris(s):
     # Twice the red car's speed in the lane nearer the viewer. begin=-4s puts it half a lap
     # ahead, so it catches the red car exactly mid-screen once per 16s cycle.
-    mover, body = driving(lane(s, -26, 15), "8s", begin="-4s")
-    for i, y in enumerate((-8, -12, -16)):
-        line = el("path", body, d=f"M-27,{y} H-44", stroke="#c8ccd2", stroke_width=1.2,
+    mover, body = driving(lane(s, -50, 29), "8s", 1, begin="-4s")
+    el("ellipse", body, cx=0, cy=0, rx=74, ry=4, fill="#000000", opacity="0.25")
+    for i, y in enumerate((-12, -28, -44)):
+        line = el("path", body, d=f"M-80,{y} H-122", stroke="#c8ccd2", stroke_width=1.6,
                   stroke_linecap="round", opacity="0")
         el("animate", line, attributeName="opacity", values="0;0.8;0", dur="0.3s",
            begin=f"{i * 0.1:.1f}s", repeatCount="indefinite")
-    el("path", body, d="M-23,-5 L-23,-13 Q-22.5,-15.5 -19,-15.5 L-13,-15.5 L-9.5,-22 L4,-22 "
-       "L11,-15.5 L19,-14.5 Q23.5,-13.5 23.5,-9.5 L23.5,-5 Z",
-       fill="#f5f5f5", stroke="#b9bdc2", stroke_width=0.6)
-    el("path", body, d="M-13,-15.5 L-9.5,-22 L4,-22 L11,-15.5 Z", fill="#161616")
-    el("path", body, d="M-11.5,-16.3 L-8.6,-21 L-2.5,-21 L-2.5,-16.3 Z "
-       "M-0.8,-16.3 L-0.8,-21 L3.4,-21 L8.6,-16.3 Z", fill="#8fb4d8")
-    el("path", body, d="M-12.5,-23.2 L-6,-23.2 L-6,-22 L-11.5,-21.6 Z", fill="#161616")
-    el("rect", body, x=-23, y=-7.2, width=46.5, height=1.3, fill="#e10600")
-    el("text", body, "GR", x=-4, y=-9.2, fill="#e10600",
-       style="font-size: 4.5px; font-weight: 700; font-style: italic")
-    el("rect", body, x=-23.4, y=-13, width=1.6, height=2.6, fill="#e10600")
-    el("circle", body, cx=21.8, cy=-11, r=1.6, fill="#fff6c2")
-    wheels(body, (-13, 13), "0.15s", hub="#d9d9d9")
+    # Photo of the actual car (cut out, mirrored, windows tinted, rims motion-blurred).
+    el("image", body, href=YARIS, x=-75, y=-60.5, width=150, height=60.5)
     return mover
 
 
