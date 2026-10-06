@@ -102,7 +102,7 @@ def ground(s):
     return weeks, lambda w, d: (160 + (w - d) * dx, offset_y + (w + d - 1) * dy)
 
 
-EVO_LANE, YARIS_LANE = 8.2, 10.2
+EVO_LANE, YARIS_LANE = 8.9, 12.1
 
 
 def lane(s, d):
@@ -121,13 +121,13 @@ def road(s):
         return f"M{x0:.1f},{y0:.1f} L{x1:.1f},{y1:.1f}"
 
     g = el("g")
-    corners = [at(w0, 7.25), at(w1, 7.25), at(w1, 11.15), at(w0, 11.15)]
+    corners = [at(w0, 7.25), at(w1, 7.25), at(w1, 13.75), at(w0, 13.75)]
     el("path", g, d="M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in corners) + " Z",
        class_="fill-weak", opacity="0.16")
-    for d in (7.4, 11.0):
-        el("path", g, d=line(d), class_="stroke-weak", stroke_width=2, opacity="0.6", fill="none")
-    el("path", g, d=line((EVO_LANE + YARIS_LANE) / 2), class_="stroke-weak", stroke_width=2,
-       stroke_dasharray="26 20", opacity="0.6", fill="none")
+    for d in (7.45, 13.55):
+        el("path", g, d=line(d), class_="stroke-weak", stroke_width=3, opacity="0.6", fill="none")
+    el("path", g, d=line((EVO_LANE + YARIS_LANE) / 2), class_="stroke-weak", stroke_width=3,
+       stroke_dasharray="30 22", opacity="0.6", fill="none")
     return g
 
 
@@ -232,8 +232,9 @@ def decorate(path, stats):
     for r in root.findall(f"{{{NS}}}rect[@class='fill-bg']"):
         root.remove(r)
     root.find(f"{{{NS}}}style").text += FONT_CSS
+    # Road sits under the totals text and cars (the text group is the tool's last <g>).
+    root.insert(list(root).index(groups[3]), road(stats))
     root.append(captions(stats))
-    root.append(road(stats))
     root.append(evo_x(stats))
     root.append(gr_yaris(stats))
     tree.write(path, encoding="unicode")
