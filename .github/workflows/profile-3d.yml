@@ -17,25 +17,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           USERNAME: ${{ github.repository_owner }}
-      - name: Remove radar and language charts
-        # GitHub hides org private-repo details, so these charts only reflect public commits
-        run: |
-          python3 - <<'PY'
-          import glob
-          import xml.etree.ElementTree as ET
-
-          NS = "http://www.w3.org/2000/svg"
-          ET.register_namespace("", NS)
-          for path in glob.glob("profile-3d-contrib/*.svg"):
-              tree = ET.parse(path)
-              root = tree.getroot()
-              groups = [c for c in root if c.tag == f"{{{NS}}}g"]
-              # v0.9.3 layout: 3D calendar, radar, language pie, totals
-              assert len(groups) == 4, (path, len(groups))
-              for g in groups[1:3]:
-                  root.remove(g)
-              tree.write(path, encoding="unicode")
-          PY
+      - name: Decorate (drop public-only charts, add captions, car, font)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 .github/decorate.py profile-3d-contrib ${{ github.repository_owner }}
       - name: Commit & Push
         run: |
           git config user.name github-actions
